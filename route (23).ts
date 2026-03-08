@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle, Loader2 } from 'lucide-react'
 
 interface Question { id: string; questionText: string; options: any; domainWeights: any }
 interface Course { id: string; name: string; provider: string; url: string; domain: string; durationWeeks?: number | null; priceRange?: string | null; description?: string | null }
@@ -20,7 +20,9 @@ export function QuizClient({ questions, courses }: { questions: Question[]; cour
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<string, number>>({})
   const [done, setDone] = useState(false)
-  const [savedMsg, setSavedMsg] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   function answer(questionId: string, optionIndex: number) {
     setAnswers(prev => ({ ...prev, [questionId]: optionIndex }))
@@ -35,8 +37,8 @@ export function QuizClient({ questions, courses }: { questions: Question[]; cour
     questions.forEach(q => {
       const idx = answers[q.id]
       if (idx === undefined) return
-      const weights = (q.domainWeights as any)
-      Object.entries(weights).forEach(([domain, vals]: [string, any]) => {
+      const weights = q.domainWeights as Record<string, number[]>
+      Object.entries(weights).forEach(([domain, vals]) => {
         scores[domain] = (scores[domain] || 0) + (vals[idx] || 0)
       })
     })
@@ -46,6 +48,31 @@ export function QuizClient({ questions, courses }: { questions: Question[]; cour
   const results = done ? calcResults() : []
   const topDomains = results.slice(0, 2).map(([d]) => d)
   const recommendedCourses = courses.filter(c => topDomains.includes(c.domain))
+
+  async function saveResults() {
+    if (!done) return
+    setSaving(true); setSaveError('')
+    try {
+      const domainScores = Object.fromEntries(results)
+      const res = await fetch('/api/user/quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domainScores,
+          recommendedCourses: recommendedCourses.map(c => c.id),
+        }),
+      })
+      if (res.ok) {
+        setSaved(true)
+      } else {
+        const data = await res.json()
+        setSaveError(data.error || 'שגיאה בשמירה')
+      }
+    } catch {
+      setSaveError('שגיאת רשת')
+    }
+    setSaving(false)
+  }
 
   const progress = Math.round((Object.keys(answers).length / questions.length) * 100)
   const currentQ = questions[current]
@@ -167,15 +194,32 @@ export function QuizClient({ questions, courses }: { questions: Question[]; cour
           </Link>
         </div>
       ) : (
-        <button onClick={() => setSavedMsg(true)}
-          className={cn('w-full py-4 rounded-xl font-bold transition-colors flex items-center justify-center gap-2',
-            savedMsg ? 'bg-green-light text-green-dark border-2 border-green-mid/30' : 'bg-green-dark text-white hover:bg-green-800')}>
-          {savedMsg && <CheckCircle size={18} aria-hidden="true" />}
-          {savedMsg ? 'נשמר לפרופיל שלך!' : 'שמור תוצאות לפרופיל'}
-        </button>
+        <div>
+          {saveError && (
+            <div className="bg-red-50 text-red-700 rounded-xl px-4 py-3 text-sm mb-3">{saveError}</div>
+          )}
+          <button
+            onClick={saveResults}
+            disabled={saving || saved}
+            className={cn(
+              'w-full py-4 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-60',
+              saved
+                ? 'bg-green-light text-green-dark border-2 border-green-mid/30'
+                : 'bg-green-dark text-white hover:bg-green-800'
+            )}>
+            {saving && <Loader2 size={18} className="animate-spin" />}
+            {saved && <CheckCircle size={18} />}
+            {saving ? 'שומר...' : saved ? 'נשמר לפרופיל שלך!' : 'שמור תוצאות לפרופיל'}
+          </button>
+          {saved && (
+            <Link href="/profile" className="block text-center mt-2 text-sm text-blue-mid hover:underline">
+              צפה בפרופיל שלי ←
+            </Link>
+          )}
+        </div>
       )}
 
-      <button onClick={() => { setDone(false); setCurrent(0); setAnswers({}) }}
+      <button onClick={() => { setDone(false); setCurrent(0); setAnswers({}); setSaved(false) }}
         className="w-full mt-3 py-3 text-gray-400 hover:text-gray-600 text-sm transition-colors">
         מלא את השאלון מחדש
       </button>

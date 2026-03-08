@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { CheckCircle, Loader2 } from 'lucide-react'
 
 interface Destination {
   id: string; name: string; nameEn?: string | null; region: string; flag?: string | null
@@ -33,7 +34,9 @@ export function TripPlannerClient({ destinations }: { destinations: Destination[
   const [selectedDest, setSelectedDest] = useState<Destination | null>(null)
   const [duration, setDuration] = useState(30)
   const [accomType, setAccomType] = useState('hostel')
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   const regions = [...new Set(destinations.map(d => d.region))]
 
@@ -55,6 +58,32 @@ export function TripPlannerClient({ destinations }: { destinations: Destination[
   }
 
   const budget = step === 3 ? calcBudget() : null
+
+  async function saveTrip() {
+    if (!selectedDest || !budget) return
+    setSaving(true); setSaveError('')
+    try {
+      const res = await fetch('/api/user/trip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destinationId: selectedDest.id,
+          durationDays: duration,
+          budgetTotal: budget.total,
+          notes: `סגנון לינה: ${accommodationTypes[accomType].label}`,
+        }),
+      })
+      if (res.ok) {
+        setSaved(true)
+      } else {
+        const data = await res.json()
+        setSaveError(data.error || 'שגיאה בשמירה')
+      }
+    } catch {
+      setSaveError('שגיאת רשת')
+    }
+    setSaving(false)
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-fade-in">
@@ -88,7 +117,7 @@ export function TripPlannerClient({ destinations }: { destinations: Destination[
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {destinations.filter(d => d.region === region).map(dest => (
                   <button key={dest.id}
-                    onClick={() => { setSelectedDest(dest); setStep(2) }}
+                    onClick={() => { setSelectedDest(dest); setStep(2); setSaved(false) }}
                     className={cn(
                       'p-4 rounded-2xl border-2 text-right transition-all hover:border-green-mid hover:bg-green-light card-hover',
                       selectedDest?.id === dest.id ? 'border-green-dark bg-green-light' : 'border-gray-100 bg-white'
@@ -205,15 +234,32 @@ export function TripPlannerClient({ destinations }: { destinations: Destination[
               </Link>
             </div>
           ) : (
-            <button
-              onClick={() => setSaved(true)}
-              className={cn('w-full py-4 rounded-xl font-bold transition-colors',
-                saved ? 'bg-green-light text-green-dark border-2 border-green-mid/30' : 'bg-green-dark text-white hover:bg-green-800')}>
-              {saved ? '✅ הטיול נשמר לפרופיל שלך!' : 'שמור לפרופיל'}
-            </button>
+            <div>
+              {saveError && (
+                <div className="bg-red-50 text-red-700 rounded-xl px-4 py-3 text-sm mb-3">{saveError}</div>
+              )}
+              <button
+                onClick={saveTrip}
+                disabled={saving || saved}
+                className={cn(
+                  'w-full py-4 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-60',
+                  saved
+                    ? 'bg-green-light text-green-dark border-2 border-green-mid/30'
+                    : 'bg-green-dark text-white hover:bg-green-800'
+                )}>
+                {saving && <Loader2 size={18} className="animate-spin" />}
+                {saved && <CheckCircle size={18} />}
+                {saving ? 'שומר...' : saved ? '✅ הטיול נשמר לפרופיל שלך!' : 'שמור לפרופיל'}
+              </button>
+              {saved && (
+                <Link href="/profile" className="block text-center mt-2 text-sm text-blue-mid hover:underline">
+                  צפה בפרופיל שלי ←
+                </Link>
+              )}
+            </div>
           )}
 
-          <button onClick={() => { setStep(1); setSelectedDest(null) }}
+          <button onClick={() => { setStep(1); setSelectedDest(null); setSaved(false) }}
             className="w-full mt-3 py-3 text-gray-400 hover:text-gray-600 text-sm transition-colors">
             תכנן יעד אחר
           </button>
